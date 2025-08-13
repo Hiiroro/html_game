@@ -2,11 +2,10 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<title>シューティングゲーム（画像版）</title>
+<title>シューティングゲーム（スマホ対応版）</title>
 <style>
   body { background: #001; margin: 0; overflow: hidden; text-align: center; }
-  canvas { display: block; margin: 0 auto; background: #001e3c; }
-  /* ゲームオーバー時のボタン */
+  canvas { display: block; margin: 0 auto; background: #001e3c; touch-action: none; }
   #restartBtn {
     display: none;
     margin-top: 20px;
@@ -25,12 +24,9 @@
 </head>
 <body>
 <canvas id="game" width="480" height="640"></canvas>
-
-<!-- やり直しボタン -->
 <button id="restartBtn">やり直す</button>
 
-<!-- BGM用audioタグ -->
-<audio id="bgm" src="MEGALOVANIA.wav" loop></audio>
+<audio id="bgm" src="THE WORLD REVOLVING.wav" loop></audio>
 <audio id="loseBgm" src="ケツイ.wav"></audio>
 
 <script>
@@ -45,6 +41,10 @@ let keys = {};
 let score = 0;
 let missed = 0;
 let gameover = false;
+
+// --- スマホ操作用 ---
+let touchX = null;
+let touchFire = false;
 
 // player画像
 const playerImgs = [new Image(), new Image(), new Image(), new Image()];
@@ -74,6 +74,17 @@ class Player {
   move() {
     if (keys["ArrowLeft"] && this.x > 0) this.x -= this.speed;
     if (keys["ArrowRight"] && this.x + this.width < canvas.width) this.x += this.speed;
+
+    // スマホ操作
+    if (touchX !== null) {
+      if (touchX < canvas.width / 2) {
+        this.x -= this.speed;
+      } else {
+        this.x += this.speed;
+      }
+      if (this.x < 0) this.x = 0;
+      if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
+    }
   }
   draw() {
     ctx.save();
@@ -182,7 +193,7 @@ function update() {
   player.move();
   player.imgIndex = getCurrentLevel();
 
-  if(keys[" "] || keys["Spacebar"]){
+  if(keys[" "] || keys["Spacebar"] || touchFire){
     if(bullets.length < 5 && !spacePressed) {
       bullets.push(new Bullet(player.x + player.width/2 - BULLET_SIZE.w/2, player.y));
       spacePressed = true;
@@ -230,7 +241,6 @@ function update() {
     player.imgIndex = 0;
     enemies.forEach(e => e.imgIndex = 0);
 
-    // BGM切り替え
     const bgm = document.getElementById("bgm");
     const loseBgm = document.getElementById("loseBgm");
     bgm.pause();
@@ -286,6 +296,24 @@ window.addEventListener("keydown", e => {
 });
 window.addEventListener("keyup", e => {
   keys[e.key] = false;
+});
+
+// --- スマホ操作用タッチイベント ---
+canvas.addEventListener("touchstart", e => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  touchX = touch.clientX - canvas.getBoundingClientRect().left;
+  touchFire = true;
+});
+canvas.addEventListener("touchmove", e => {
+  e.preventDefault();
+  const touch = e.touches[0];
+  touchX = touch.clientX - canvas.getBoundingClientRect().left;
+});
+canvas.addEventListener("touchend", e => {
+  e.preventDefault();
+  touchX = null;
+  touchFire = false;
 });
 
 document.getElementById("restartBtn").addEventListener("click", () => {
