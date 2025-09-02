@@ -2,10 +2,29 @@
 <html lang="ja">
 <head>
 <meta charset="UTF-8" />
-<title>シューティングゲーム（ランキング付き）</title>
+<title>シューティングゲーム（ジグザグ敵＆ランキング付き＋時止め＋敵説明）</title>
 <style>
-  body { background: #001; margin: 0; overflow: hidden; text-align: center; }
-  canvas { display: block; margin: 0 auto; background: #001e3c; touch-action: none; }
+  body { background: #001; margin: 0; overflow: hidden; text-align: center; color: white; }
+  #container {
+    display: flex;
+    justify-content: center;
+    align-items: flex-start;
+    margin-top: 10px;
+  }
+  canvas { display: block; background: #001e3c; touch-action: none; }
+  #enemyInfo {
+    margin-left: 20px;
+    text-align: left;
+    font-size: 16px;
+  }
+  .enemy-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+  }
+  .enemy-row img {
+    margin-right: 10px;
+  }
   #restartBtn {
     display: none;
     margin-top: 20px;
@@ -21,11 +40,35 @@
 </style>
 </head>
 <body>
-<canvas id="game" width="480" height="640"></canvas>
+<div id="container">
+  <canvas id="game" width="480" height="640"></canvas>
+
+  <!-- 敵キャラの情報欄 -->
+  <div id="enemyInfo">
+    <h3>敵・アイテム情報</h3>
+    <div class="enemy-row">
+      <img src="enemy1.png" width="40" height="40">
+      <span>HP: 1</span>
+    </div>
+    <div class="enemy-row">
+      <img src="enemy2.png" width="40" height="40">
+      <span>HP: 2</span>
+    </div>
+    <div class="enemy-row">
+      <img src="enemy3.png" width="40" height="40">
+      <span>HP: 3</span>
+    </div>
+    <div class="enemy-row">
+        <img src="item.png" width="40" height="40">
+        <span>プレイヤーHPを1回復(ドロップ率: 5%)</span>
+      </div>
+  </div>
+</div>
+
 <button id="restartBtn">やり直す</button>
 
-<audio id="bgm" src="THE WORLD REVOLVING.wav" loop></audio>
-<audio id="loseBgm" src="ケツイ.wav"></audio>
+<audio id="bgm" src="sample1.wav" loop></audio>
+<audio id="loseBgm" src="sample2.wav"></audio>
 
 <script>
 const canvas = document.getElementById("game");
@@ -43,6 +86,11 @@ let gameover = false;
 // --- スマホ操作用 ---
 let touchX = null;
 let touchFire = false;
+
+// --- 時止め用 ---
+let timeStopActive = false;
+let timeStopTimer = 0;
+let timeStopRemaining = 3; // 残り回数
 
 // player画像
 const playerImgs = [new Image(), new Image(), new Image(), new Image()];
@@ -74,6 +122,7 @@ function getRanking() {
   return JSON.parse(localStorage.getItem("ranking") || "[]");
 }
 
+// --- Playerクラス ---
 class Player {
   constructor() {
     this.x = canvas.width / 2 - PLAYER_SIZE.w/2;
@@ -88,14 +137,9 @@ class Player {
   move() {
     if (keys["ArrowLeft"] && this.x > 0) this.x -= this.speed;
     if (keys["ArrowRight"] && this.x + this.width < canvas.width) this.x += this.speed;
-
-    // スマホ操作
     if (touchX !== null) {
-      if (touchX < canvas.width / 2) {
-        this.x -= this.speed;
-      } else {
-        this.x += this.speed;
-      }
+      if (touchX < canvas.width / 2) { this.x -= this.speed; }
+      else { this.x += this.speed; }
       if (this.x < 0) this.x = 0;
       if (this.x + this.width > canvas.width) this.x = canvas.width - this.width;
     }
@@ -114,30 +158,21 @@ class Player {
       this.invincibleTimer = 60;
     }
   }
-  update() {
-    if (this.invincibleTimer > 0) this.invincibleTimer--;
-  }
+  update() { if (this.invincibleTimer > 0) this.invincibleTimer--; }
 }
 
+// --- Bulletクラス ---
 class Bullet {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.width = BULLET_SIZE.w;
-    this.height = BULLET_SIZE.h;
-    this.speed = 10;
-  }
+  constructor(x, y) { this.x=x; this.y=y; this.width=BULLET_SIZE.w; this.height=BULLET_SIZE.h; this.speed=10; }
   move() { this.y -= this.speed; }
-  draw() {
-    ctx.fillStyle = "yellow";
-    ctx.fillRect(this.x, this.y, this.width, this.height);
-  }
+  draw() { ctx.fillStyle="yellow"; ctx.fillRect(this.x,this.y,this.width,this.height); }
   isOffscreen() { return this.y + this.height < 0; }
-  getRect() { return {x:this.x, y:this.y, width:this.width, height:this.height}; }
+  getRect() { return {x:this.x,y:this.y,width:this.width,height:this.height}; }
 }
 
+// --- Enemyクラス（ジグザグ対応） ---
 class Enemy {
-  constructor(x, y, hp=2, imgIndex=1) {
+  constructor(x, y, hp=2, imgIndex=1, zigzag=false) {
     this.x = x;
     this.y = y;
     this.width = ENEMY_SIZE.w;
@@ -146,8 +181,18 @@ class Enemy {
     this.hp = hp;
     this.hitFlashTimer = 0;
     this.imgIndex = imgIndex;
+    this.zigzag = zigzag;
+    this.baseX = x;
+    this.angle = 0;
+    this.amplitude = 50;
   }
-  move() { this.y += this.speed; }
+  move() {
+    this.y += this.speed;
+    if(this.zigzag){
+      this.angle += 0.1;
+      this.x = this.baseX + Math.sin(this.angle) * this.amplitude;
+    }
+  }
   draw() {
     ctx.save();
     if(this.hitFlashTimer > 0){ ctx.globalAlpha = 0.7; }
@@ -155,39 +200,26 @@ class Enemy {
     ctx.restore();
     if(this.hitFlashTimer > 0) this.hitFlashTimer--;
   }
-  takeDamage() { this.hp--; this.hitFlashTimer = 5; }
-  getRect() { return {x:this.x, y:this.y, width:this.width, height:this.height}; }
+  takeDamage() { this.hp--; this.hitFlashTimer=5; }
+  getRect() { return {x:this.x,y:this.y,width:this.width,height:this.height}; }
   isOffscreen() { return this.y > canvas.height; }
 }
 
+// --- Itemクラス ---
 class Item {
-  constructor(x, y) {
-    this.x = x;
-    this.y = y;
-    this.width = 30;
-    this.height = 30;
-    this.speed = 2;
-  }
+  constructor(x, y) { this.x=x; this.y=y; this.width=30; this.height=30; this.speed=2; }
   move() { this.y += this.speed; }
-  draw() { ctx.drawImage(itemImg, this.x, this.y, this.width, this.height); }
-  getRect() { return {x:this.x, y:this.y, width:this.width, height:this.height}; }
+  draw() { ctx.drawImage(itemImg,this.x,this.y,this.width,this.height); }
+  getRect() { return {x:this.x,y:this.y,width:this.width,height:this.height}; }
   isOffscreen() { return this.y > canvas.height; }
 }
 
-function rectsCollide(r1, r2) {
-  return !(r2.x > r1.x + r1.width || 
-           r2.x + r2.width < r1.x || 
-           r2.y > r1.y + r1.height || 
-           r2.y + r2.height < r1.y);
-}
+// --- 衝突判定 ---
+function rectsCollide(r1,r2) { return !(r2.x>r1.x+r1.width || r2.x+r2.width<r1.x || r2.y>r1.y+r1.height || r2.y+r2.height<r1.y); }
 
-let player;
-let bullets;
-let enemies;
-let items;
-let spacePressed;
+let player, bullets, enemies, items, spacePressed;
 
-function initGame(){
+function initGame() {
   player = new Player();
   bullets = [];
   enemies = [];
@@ -196,80 +228,77 @@ function initGame(){
   missed = 0;
   gameover = false;
   spacePressed = false;
+
+  // 時止めリセット
+  timeStopActive = false;
+  timeStopTimer = 0;
+  timeStopRemaining = 3;
+
   document.getElementById("restartBtn").style.display = "none";
   gameLoop();
 }
 
 function getCurrentLevel(){
-  if(score >= 40) return 3;
-  if(score >= 20) return 2;
+  if(score >= 20) return 3;
+  if(score >= 10) return 2;
   return 1;
 }
 
+// --- 敵生成 ---
 function spawnEnemy() {
   const x = Math.random() * (canvas.width - ENEMY_SIZE.w);
-  const level = getCurrentLevel();
-  let hp = 1;
-  if(level === 1) hp = 1;
-  else if(level === 2) hp = 2;
-  else if(level === 3) hp = 3;
-  enemies.push(new Enemy(x, -ENEMY_SIZE.h, hp, level));
+  if(score >= 50){
+    enemies.push(new Enemy(x,-ENEMY_SIZE.h,3,3,true));
+  } else if(score >= 40){
+    enemies.push(new Enemy(x,-ENEMY_SIZE.h,2,2,true));
+  } else if(score >= 30){
+    enemies.push(new Enemy(x,-ENEMY_SIZE.h,1,1,true));
+  } else {
+    const level = getCurrentLevel();
+    enemies.push(new Enemy(x,-ENEMY_SIZE.h,level,level,false));
+  }
 }
 
+// --- ゲーム更新 ---
 function update() {
   if(gameover) return;
 
   player.move();
   player.imgIndex = getCurrentLevel();
 
-  if(keys[" "] || keys["Spacebar"] || touchFire){
-    if(bullets.length < 5 && !spacePressed) {
-      bullets.push(new Bullet(player.x + player.width/2 - BULLET_SIZE.w/2, player.y));
-      spacePressed = true;
+  if(keys[" "]||keys["Spacebar"]||touchFire){
+    if(bullets.length<5 && !spacePressed){
+      bullets.push(new Bullet(player.x+player.width/2-BULLET_SIZE.w/2,player.y));
+      spacePressed=true;
     }
-  } else {
-    spacePressed = false;
+  } else spacePressed=false;
+
+  bullets.forEach((b,bi)=>{ b.move(); if(b.isOffscreen()) bullets.splice(bi,1); });
+
+  // --- 敵生成も時止め中は停止 ---
+  if(!timeStopActive && Math.random()<0.02){ spawnEnemy(); }
+
+  // 敵の動き（時止め中は停止）
+  if(!timeStopActive){
+    enemies.forEach((e,i)=>{ e.move(); if(e.isOffscreen()){ enemies.splice(i,1); missed++; } });
   }
 
-  bullets.forEach((b, bi) => {
-    b.move();
-    if(b.isOffscreen()) bullets.splice(bi,1);
-  });
-
-  if(Math.random() < 0.02){ spawnEnemy(); }
-
-  enemies.forEach((e,i) => {
-    e.move();
-    if(e.isOffscreen()){ enemies.splice(i,1); missed++; }
-  });
-
-  bullets.forEach((b, bi) => {
-    enemies.forEach((e, ei) => {
-      if(rectsCollide(b.getRect(), e.getRect())){
-        bullets.splice(bi,1);
-        e.takeDamage();
-        if(e.hp <= 0){
-          enemies.splice(ei,1);
-          score++;
-          if(Math.random() < 0.05) {
-            items.push(new Item(e.x + e.width/2 - 15, e.y));
-          }
-        }
+  bullets.forEach((b,bi)=>{ enemies.forEach((e,ei)=>{
+    if(rectsCollide(b.getRect(),e.getRect())){
+      bullets.splice(bi,1);
+      e.takeDamage();
+      if(e.hp<=0){ enemies.splice(ei,1); score++;
+        if(Math.random()<0.05) items.push(new Item(e.x+e.width/2-15,e.y));
       }
-    });
-  });
-
-  enemies.forEach((e, ei) => {
-    if(rectsCollide(player, e.getRect())){
-      player.takeDamage();
-      enemies.splice(ei,1);
     }
-  });
+  }); });
 
-  items.forEach((it, ii) => {
+  enemies.forEach((e,ei)=>{ if(rectsCollide(player,e.getRect())){ player.takeDamage(); enemies.splice(ei,1); } });
+
+  items.forEach((it,ii)=>{
     it.move();
     if(it.isOffscreen()) items.splice(ii,1);
-    if(rectsCollide(player, it.getRect())){
+    if(rectsCollide(player,it.getRect())){
       items.splice(ii,1);
       player.hp++;
     }
@@ -277,101 +306,94 @@ function update() {
 
   player.update();
 
-  if(player.hp <= 0 || missed >= 3){
-    gameover = true;
-    player.imgIndex = 0;
-    enemies.forEach(e => e.imgIndex = 0);
+  // 時止めタイマー減少
+  if(timeStopActive){
+    timeStopTimer--;
+    if(timeStopTimer<=0) timeStopActive=false;
+  }
 
-    // --- ランキング保存 ---
+  if(player.hp<=0 || missed>=3){
+    gameover=true;
+    player.imgIndex=0;
+    enemies.forEach(e=>e.imgIndex=0);
+
     saveScore(score);
 
     const bgm = document.getElementById("bgm");
     const loseBgm = document.getElementById("loseBgm");
-    bgm.pause();
-    bgm.currentTime = 0;
-    loseBgm.currentTime = 0;
-    loseBgm.play();
+    bgm.pause(); bgm.currentTime=0;
+    loseBgm.currentTime=0; loseBgm.play();
 
-    document.getElementById("restartBtn").style.display = "inline-block";
+    document.getElementById("restartBtn").style.display="inline-block";
   }
 }
 
-function draw() {
-  ctx.clearRect(0, 0, canvas.width, canvas.height);
+// --- 描画 ---
+function draw(){
+  ctx.clearRect(0,0,canvas.width,canvas.height);
   player.draw();
-  bullets.forEach(b => b.draw());
-  enemies.forEach(e => e.draw());
-  items.forEach(it => it.draw());
+  bullets.forEach(b=>b.draw());
+  enemies.forEach(e=>e.draw());
+  items.forEach(it=>it.draw());
 
-  ctx.fillStyle = "white";
-  ctx.font = "20px sans-serif";
-  ctx.fillText(`HP: ${player.hp}`, 10, 30);
-  ctx.fillText(`Score: ${score}`, 10, 60);
-  ctx.fillStyle = "salmon";
-  ctx.fillText(`Missed: ${missed}/3`, 10, 90);
+  ctx.fillStyle="white";
+  ctx.font="20px sans-serif";
+  ctx.fillText(`HP: ${player.hp}`,10,30);
+  ctx.fillText(`スコア: ${score}`,10,60);
+  ctx.fillStyle="salmon";
+  ctx.fillText(`ミス（敵を逃した回数）: ${missed}/3`,10,90);
+
+  ctx.fillStyle="cyan";
+  ctx.fillText(`時間停止(Shiftキー): ${timeStopRemaining}`,10,120);
+
+  if(timeStopActive){
+    ctx.fillStyle="cyan"; ctx.font="40px sans-serif";
+    ctx.fillText("時間停止!", canvas.width/2-100, 150);
+  }
 
   if(gameover){
-    ctx.fillStyle = "red";
-    ctx.font = "50px sans-serif";
-    ctx.fillText("GAME OVER", canvas.width/2 - 130, canvas.height/2);
+    ctx.fillStyle="red"; ctx.font="50px sans-serif";
+    ctx.fillText("GAME OVER",canvas.width/2-130,canvas.height/2);
 
-    // --- ランキング表示 ---
-    const ranking = getRanking();
-    ctx.fillStyle = "white";
-    ctx.font = "20px sans-serif";
-    ctx.fillText("Your Score: " + score, canvas.width/2 - 80, canvas.height/2 + 50);
-    ctx.fillText("Ranking:", canvas.width/2 - 50, canvas.height/2 + 90);
-    ranking.forEach((s, i) => {
-      ctx.fillText(`${i+1}. ${s}`, canvas.width/2 - 30, canvas.height/2 + 120 + i*25);
-    });
+    const ranking=getRanking();
+    ctx.fillStyle="white"; ctx.font="20px sans-serif";
+    ctx.fillText("Your Score: "+score,canvas.width/2-80,canvas.height/2+50);
+    ctx.fillText("Ranking:",canvas.width/2-50,canvas.height/2+90);
+    ranking.forEach((s,i)=>{ ctx.fillText(`${i+1}. ${s}`,canvas.width/2-30,canvas.height/2+120+i*25); });
   }
 }
 
-function gameLoop() {
-  update();
-  draw();
-  if(!gameover){ requestAnimationFrame(gameLoop); }
-}
+function gameLoop(){ update(); draw(); if(!gameover) requestAnimationFrame(gameLoop); }
 
-window.onload = () => {
-  const bgm = document.getElementById("bgm");
-  bgm.volume = 0.5;
-  bgm.play().catch(() => { console.log("自動再生が制限されています。"); });
+window.onload = ()=>{
+  const bgm=document.getElementById("bgm"); bgm.volume=0.5;
+  bgm.play().catch(()=>{ console.log("自動再生制限"); });
   initGame();
 };
 
-window.addEventListener("keydown", e => {
-  keys[e.key] = true;
-  const bgm = document.getElementById("bgm");
-  if(bgm.paused && !gameover){ bgm.play(); }
-});
-window.addEventListener("keyup", e => { keys[e.key] = false; });
+window.addEventListener("keydown",e=>{
+  keys[e.key]=true;
+  const bgm=document.getElementById("bgm");
+  if(bgm.paused && !gameover) bgm.play();
 
-// --- スマホ操作用 ---
-canvas.addEventListener("touchstart", e => {
-  e.preventDefault();
-  const touch = e.touches[0];
-  touchX = touch.clientX - canvas.getBoundingClientRect().left;
-  touchFire = true;
+  // --- 時止め発動 ---
+  if(e.key==="Shift" && timeStopRemaining>0 && !timeStopActive){
+    timeStopActive = true;
+    timeStopTimer = 300; // 5秒
+    timeStopRemaining--;
+  }
 });
-canvas.addEventListener("touchmove", e => {
-  e.preventDefault();
-  const touch = e.touches[0];
-  touchX = touch.clientX - canvas.getBoundingClientRect().left;
-});
-canvas.addEventListener("touchend", e => {
-  e.preventDefault();
-  touchX = null;
-  touchFire = false;
-});
+window.addEventListener("keyup",e=>{ keys[e.key]=false; });
 
-document.getElementById("restartBtn").addEventListener("click", () => {
-  const bgm = document.getElementById("bgm");
-  const loseBgm = document.getElementById("loseBgm");
-  loseBgm.pause();
-  loseBgm.currentTime = 0;
-  bgm.currentTime = 0;
-  bgm.play();
+// --- スマホ操作 ---
+canvas.addEventListener("touchstart", e=>{ e.preventDefault(); const touch=e.touches[0]; touchX=touch.clientX-canvas.getBoundingClientRect().left; touchFire=true; });
+canvas.addEventListener("touchmove", e=>{ e.preventDefault(); const touch=e.touches[0]; touchX=touch.clientX-canvas.getBoundingClientRect().left; });
+canvas.addEventListener("touchend", e=>{ e.preventDefault(); touchX=null; touchFire=false; });
+
+document.getElementById("restartBtn").addEventListener("click",()=>{
+  const bgm=document.getElementById("bgm");
+  const loseBgm=document.getElementById("loseBgm");
+  loseBgm.pause(); loseBgm.currentTime=0; bgm.currentTime=0; bgm.play();
   initGame();
 });
 </script>
